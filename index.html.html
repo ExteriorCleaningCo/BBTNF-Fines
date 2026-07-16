@@ -437,7 +437,7 @@
   <div class="week-nav">
     <button onclick="shiftWeek(-1)">‹</button>
     <div class="week-label">
-      <div class="date" id="weekDateLabel">Mon 13 Jul</div>
+      <div class="date" id="totalToDateLabel">£0 collected to date</div>
       <div class="tag" id="weekTag">This week</div>
       <button class="jump" id="jumpBtn" onclick="jumpToCurrentWeek()" style="display:none;">Jump to this week</button>
     </div>
@@ -466,8 +466,12 @@
 </div>
 
 <div class="content" id="historyView" style="display:none;">
-  <div class="section-title">Weekly history</div>
-  <div id="historyList"></div>
+  <details class="settings-collapse">
+    <summary>Weekly history <span class="count-badge" id="weeklyHistoryCountBadge">0</span></summary>
+    <div class="collapse-body">
+      <div id="historyList"></div>
+    </div>
+  </details>
 
   <div class="alltime-header">
     <div class="section-title" style="margin:0;">Player totals</div>
@@ -548,7 +552,7 @@
     <button class="danger-btn" onclick="resetAllData()">Erase everything</button>
   </div>
 
-  <p style="text-align:center; font-size:10px; color:var(--muted); margin-top:18px;">Build 2026-07-15-4</p>
+  <p style="text-align:center; font-size:10px; color:var(--muted); margin-top:18px;">Build 2026-07-16-5</p>
 </div>
 
 <div class="tabbar">
@@ -800,7 +804,11 @@ function render(){
 }
 
 function renderWeekHeader(){
-  document.getElementById('weekDateLabel').textContent = fmtLabelFull(viewingMonday);
+  let totalCollected = 0;
+  Object.values(data.weeks).forEach(wk=>{
+    totalCollected += wk.payments.reduce((s,p)=>s+p.amount,0);
+  });
+  document.getElementById('totalToDateLabel').textContent = `${money(totalCollected)} collected to date`;
   const isCurrent = fmtKey(viewingMonday) === fmtKey(currentMonday);
   document.getElementById('weekTag').textContent = isCurrent ? 'This week' : (viewingMonday < currentMonday ? 'Past week' : 'Upcoming');
   document.getElementById('jumpBtn').style.display = isCurrent ? 'none' : 'inline';
@@ -913,6 +921,7 @@ function renderHistory(){
   const list = document.getElementById('historyList');
   const keys = Object.keys(data.weeks).sort().reverse();
   list.innerHTML = '';
+  let shownCount = 0;
   if(keys.length===0){
     list.innerHTML = '<div class="empty-mini">No weeks logged yet.</div>';
   }
@@ -921,6 +930,7 @@ function renderHistory(){
     const fined = wk.fines.reduce((s,f)=>s+f.amount,0);
     const collected = wk.payments.reduce((s,p)=>s+p.amount,0);
     if(fined===0 && collected===0) return;
+    shownCount++;
     const settled = collected >= fined;
     const d = new Date(k+'T00:00:00');
     const div = document.createElement('div');
@@ -936,6 +946,7 @@ function renderHistory(){
     div.onclick = ()=>{ viewingMonday = mondayOf(d); showView('main'); render(); };
     list.appendChild(div);
   });
+  document.getElementById('weeklyHistoryCountBadge').textContent = shownCount;
 
   const body = document.getElementById('alltimeBody');
   body.innerHTML = '';
