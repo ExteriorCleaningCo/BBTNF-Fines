@@ -106,9 +106,31 @@
     text-decoration:underline; margin-top:3px; padding:0;
   }
 
-  /* ---------- Total hero ---------- */
+  /* ---------- Scoreboard ---------- */
+  .scoreboard{
+    margin:14px 18px 0;
+    background:var(--pitch);
+    border:1px solid var(--pitch-line);
+    border-radius:14px;
+    display:flex;
+    overflow:hidden;
+  }
+  .score-cell{
+    flex:1; padding:12px 8px; text-align:center;
+    border-right:1px solid var(--pitch-line);
+  }
+  .score-cell:last-child{border-right:none;}
+  .score-cell .label{font-size:10px; letter-spacing:1px; text-transform:uppercase; color:#9FC2AC;}
+  .score-cell .value{
+    font-family:var(--mono); font-weight:700; font-size:19px; color:var(--amber);
+    font-variant-numeric: tabular-nums; margin-top:3px;
+  }
+  .score-cell.owe .value{color:#F0A69D;}
+  .score-cell.paid .value{color:#8FD9A0;}
+
+  /* ---------- Total hero (History tab) ---------- */
   .total-hero{
-    text-align:center; margin:16px 18px 0; position:relative; z-index:1;
+    text-align:center; margin:0 0 18px; position:relative; z-index:1;
   }
   .total-hero-amt{
     font-family:var(--mono); font-weight:700; font-size:40px; color:var(--amber);
@@ -424,17 +446,28 @@
     </div>
     <button class="icon-btn" onclick="showView('settings')">⚙</button>
   </div>
-  <div class="total-hero">
-    <div class="total-hero-amt" id="heroTotalAmt">£0</div>
-    <div class="total-hero-label">Collected to date</div>
-  </div>
   <div class="week-nav">
     <button onclick="shiftWeek(-1)">‹</button>
     <div class="week-label">
+      <div class="date" id="weekDateLabel">Mon 13 Jul</div>
       <div class="tag" id="weekTag">This week</div>
       <button class="jump" id="jumpBtn" onclick="jumpToCurrentWeek()" style="display:none;">Jump to this week</button>
     </div>
     <button onclick="shiftWeek(1)">›</button>
+  </div>
+  <div class="scoreboard">
+    <div class="score-cell owe">
+      <div class="label">Fined</div>
+      <div class="value" id="scoreFined">£0</div>
+    </div>
+    <div class="score-cell paid">
+      <div class="label">Collected</div>
+      <div class="value" id="scoreCollected">£0</div>
+    </div>
+    <div class="score-cell">
+      <div class="label">Owing</div>
+      <div class="value" id="scoreOwing">£0</div>
+    </div>
   </div>
   <div class="save-status" id="saveStatus">✓ All changes saved on this device</div>
 </div>
@@ -445,6 +478,10 @@
 </div>
 
 <div class="content" id="historyView" style="display:none;">
+  <div class="total-hero" style="margin-top:0;">
+    <div class="total-hero-amt" id="heroTotalAmt" style="color:var(--pitch);">£0</div>
+    <div class="total-hero-label" style="color:var(--muted);">Collected to date</div>
+  </div>
   <details class="settings-collapse">
     <summary>Weekly history <span class="count-badge" id="weeklyHistoryCountBadge">0</span></summary>
     <div class="collapse-body">
@@ -776,6 +813,7 @@ function render(){
   document.getElementById('groupNameDisplay').textContent = data.groupName;
   document.getElementById('groupNameInput').value = data.groupName;
   renderWeekHeader();
+  renderScoreboard();
   renderHeroTotal();
   renderPlayerGrid();
   renderSettings();
@@ -783,6 +821,7 @@ function render(){
 }
 
 function renderWeekHeader(){
+  document.getElementById('weekDateLabel').textContent = fmtLabelFull(viewingMonday);
   const isCurrent = fmtKey(viewingMonday) === fmtKey(currentMonday);
   document.getElementById('weekTag').textContent = isCurrent ? 'This week' : (viewingMonday < currentMonday ? 'Past week' : 'Upcoming');
   document.getElementById('jumpBtn').style.display = isCurrent ? 'none' : 'inline';
@@ -796,6 +835,15 @@ function shiftWeek(dir){
 function jumpToCurrentWeek(){
   viewingMonday = new Date(currentMonday);
   render();
+}
+
+function renderScoreboard(){
+  const wk = getWeek(fmtKey(viewingMonday));
+  const fined = wk.fines.reduce((s,f)=>s+f.amount,0);
+  const collected = wk.payments.reduce((s,p)=>s+p.amount,0);
+  document.getElementById('scoreFined').textContent = money(fined);
+  document.getElementById('scoreCollected').textContent = money(collected);
+  document.getElementById('scoreOwing').textContent = money(Math.max(0, fined-collected));
 }
 
 function renderHeroTotal(){
@@ -1095,6 +1143,12 @@ function renderPanelLists(){
     row.innerHTML = `<span>${label}</span><span style="display:flex;align-items:center;"><span class="amt">${money(pm.amount)}</span><button class="row-del" onclick="removePayment('${pm.id}')">✕</button></span>`;
     paymentsList.appendChild(row);
   });
+
+  const fined = wk.fines.reduce((s,f)=>s+f.amount,0);
+  const collected = wk.payments.reduce((s,p)=>s+p.amount,0);
+  document.getElementById('scoreFined').textContent = money(fined);
+  document.getElementById('scoreCollected').textContent = money(collected);
+  document.getElementById('scoreOwing').textContent = money(Math.max(0, fined-collected));
 
   if(activePlayerId){
     const playerFined = wk.fines.filter(f=>f.playerId===activePlayerId).reduce((s,f)=>s+f.amount,0);
