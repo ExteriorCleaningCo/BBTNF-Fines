@@ -106,27 +106,17 @@
     text-decoration:underline; margin-top:3px; padding:0;
   }
 
-  /* ---------- Scoreboard ---------- */
-  .scoreboard{
-    margin:14px 18px 0;
-    background:var(--pitch);
-    border:1px solid var(--pitch-line);
-    border-radius:14px;
-    display:flex;
-    overflow:hidden;
+  /* ---------- Total hero ---------- */
+  .total-hero{
+    text-align:center; margin:16px 18px 0; position:relative; z-index:1;
   }
-  .score-cell{
-    flex:1; padding:12px 8px; text-align:center;
-    border-right:1px solid var(--pitch-line);
+  .total-hero-amt{
+    font-family:var(--mono); font-weight:700; font-size:40px; color:var(--amber);
+    font-variant-numeric: tabular-nums; line-height:1.1;
   }
-  .score-cell:last-child{border-right:none;}
-  .score-cell .label{font-size:10px; letter-spacing:1px; text-transform:uppercase; color:#9FC2AC;}
-  .score-cell .value{
-    font-family:var(--mono); font-weight:700; font-size:19px; color:var(--amber);
-    font-variant-numeric: tabular-nums; margin-top:3px;
+  .total-hero-label{
+    font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:#9FC2AC; margin-top:2px;
   }
-  .score-cell.owe .value{color:#F0A69D;}
-  .score-cell.paid .value{color:#8FD9A0;}
 
   .save-status{
     text-align:center; font-size:10.5px; color:#9FC2AC; margin-top:10px;
@@ -434,28 +424,17 @@
     </div>
     <button class="icon-btn" onclick="showView('settings')">⚙</button>
   </div>
+  <div class="total-hero">
+    <div class="total-hero-amt" id="heroTotalAmt">£0</div>
+    <div class="total-hero-label">Collected to date</div>
+  </div>
   <div class="week-nav">
     <button onclick="shiftWeek(-1)">‹</button>
     <div class="week-label">
-      <div class="date" id="totalToDateLabel">£0 collected to date</div>
       <div class="tag" id="weekTag">This week</div>
       <button class="jump" id="jumpBtn" onclick="jumpToCurrentWeek()" style="display:none;">Jump to this week</button>
     </div>
     <button onclick="shiftWeek(1)">›</button>
-  </div>
-  <div class="scoreboard">
-    <div class="score-cell owe">
-      <div class="label">Fined</div>
-      <div class="value" id="scoreFined">£0</div>
-    </div>
-    <div class="score-cell paid">
-      <div class="label">Collected</div>
-      <div class="value" id="scoreCollected">£0</div>
-    </div>
-    <div class="score-cell">
-      <div class="label">Owing</div>
-      <div class="value" id="scoreOwing">£0</div>
-    </div>
   </div>
   <div class="save-status" id="saveStatus">✓ All changes saved on this device</div>
 </div>
@@ -797,18 +776,13 @@ function render(){
   document.getElementById('groupNameDisplay').textContent = data.groupName;
   document.getElementById('groupNameInput').value = data.groupName;
   renderWeekHeader();
-  renderScoreboard();
+  renderHeroTotal();
   renderPlayerGrid();
   renderSettings();
   renderHistory();
 }
 
 function renderWeekHeader(){
-  let totalCollected = 0;
-  Object.values(data.weeks).forEach(wk=>{
-    totalCollected += wk.payments.reduce((s,p)=>s+p.amount,0);
-  });
-  document.getElementById('totalToDateLabel').textContent = `${money(totalCollected)} collected to date`;
   const isCurrent = fmtKey(viewingMonday) === fmtKey(currentMonday);
   document.getElementById('weekTag').textContent = isCurrent ? 'This week' : (viewingMonday < currentMonday ? 'Past week' : 'Upcoming');
   document.getElementById('jumpBtn').style.display = isCurrent ? 'none' : 'inline';
@@ -824,13 +798,12 @@ function jumpToCurrentWeek(){
   render();
 }
 
-function renderScoreboard(){
-  const wk = getWeek(fmtKey(viewingMonday));
-  const fined = wk.fines.reduce((s,f)=>s+f.amount,0);
-  const collected = wk.payments.reduce((s,p)=>s+p.amount,0);
-  document.getElementById('scoreFined').textContent = money(fined);
-  document.getElementById('scoreCollected').textContent = money(collected);
-  document.getElementById('scoreOwing').textContent = money(Math.max(0, fined-collected));
+function renderHeroTotal(){
+  let totalCollected = 0;
+  Object.values(data.weeks).forEach(wk=>{
+    totalCollected += wk.payments.reduce((s,p)=>s+p.amount,0);
+  });
+  document.getElementById('heroTotalAmt').textContent = money(totalCollected);
 }
 
 function renderPlayerGrid(){
@@ -954,18 +927,21 @@ function renderHistory(){
     body.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--muted);">No players yet</td></tr>';
     return;
   }
-  data.players.forEach(p=>{
+  const balanceRows = data.players.map(p=>{
     let fined=0, collected=0;
     Object.values(data.weeks).forEach(wk=>{
       fined += wk.fines.filter(f=>f.playerId===p.id).reduce((s,f)=>s+f.amount,0);
       collected += wk.payments.filter(pm=>pm.playerId===p.id).reduce((s,pm)=>s+pm.amount,0);
     });
-    const owes = fined - collected;
+    return { name: p.name, fined, collected, owes: fined - collected };
+  });
+  balanceRows.sort((a,b)=> b.owes - a.owes);
+  balanceRows.forEach(r=>{
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${escapeHtml(p.name)}</td>
-      <td class="num owe">${money(fined)}</td>
-      <td class="num paid">${money(collected)}</td>
-      <td class="num ${owes>0?'owe':''}">${money(Math.max(0,owes))}</td>`;
+    tr.innerHTML = `<td>${escapeHtml(r.name)}</td>
+      <td class="num owe">${money(r.fined)}</td>
+      <td class="num paid">${money(r.collected)}</td>
+      <td class="num ${r.owes>0?'owe':''}">${money(Math.max(0,r.owes))}</td>`;
     body.appendChild(tr);
   });
 
@@ -1119,12 +1095,6 @@ function renderPanelLists(){
     row.innerHTML = `<span>${label}</span><span style="display:flex;align-items:center;"><span class="amt">${money(pm.amount)}</span><button class="row-del" onclick="removePayment('${pm.id}')">✕</button></span>`;
     paymentsList.appendChild(row);
   });
-
-  const fined = wk.fines.reduce((s,f)=>s+f.amount,0);
-  const collected = wk.payments.reduce((s,p)=>s+p.amount,0);
-  document.getElementById('scoreFined').textContent = money(fined);
-  document.getElementById('scoreCollected').textContent = money(collected);
-  document.getElementById('scoreOwing').textContent = money(Math.max(0, fined-collected));
 
   if(activePlayerId){
     const playerFined = wk.fines.filter(f=>f.playerId===activePlayerId).reduce((s,f)=>s+f.amount,0);
