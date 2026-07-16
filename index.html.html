@@ -447,13 +447,13 @@
     <button class="icon-btn" onclick="showView('settings')">⚙</button>
   </div>
   <div class="week-nav">
-    <button onclick="shiftWeek(-1)">‹</button>
+    <button id="prevWeekBtn" onclick="shiftWeek(-1)">‹</button>
     <div class="week-label">
       <div class="date" id="weekDateLabel">Mon 13 Jul</div>
       <div class="tag" id="weekTag">This week</div>
       <button class="jump" id="jumpBtn" onclick="jumpToCurrentWeek()" style="display:none;">Jump to this week</button>
     </div>
-    <button onclick="shiftWeek(1)">›</button>
+    <button id="nextWeekBtn" onclick="shiftWeek(1)">›</button>
   </div>
   <div class="scoreboard">
     <div class="score-cell owe">
@@ -478,10 +478,6 @@
 </div>
 
 <div class="content" id="historyView" style="display:none;">
-  <div class="total-hero" style="margin-top:0;">
-    <div class="total-hero-amt" id="heroTotalAmt" style="color:var(--pitch);">£0</div>
-    <div class="total-hero-label" style="color:var(--muted);">Collected to date</div>
-  </div>
   <details class="settings-collapse">
     <summary>Weekly history <span class="count-badge" id="weeklyHistoryCountBadge">0</span></summary>
     <div class="collapse-body">
@@ -807,6 +803,7 @@ function money(n){
 const currentMonday = mondayOf(new Date());
 let viewingMonday = new Date(currentMonday);
 let activePlayerId = null;
+let currentView = 'main';
 
 /* ---------------- Rendering ---------------- */
 function render(){
@@ -814,17 +811,33 @@ function render(){
   document.getElementById('groupNameInput').value = data.groupName;
   renderWeekHeader();
   renderScoreboard();
-  renderHeroTotal();
   renderPlayerGrid();
   renderSettings();
   renderHistory();
 }
 
 function renderWeekHeader(){
-  document.getElementById('weekDateLabel').textContent = fmtLabelFull(viewingMonday);
-  const isCurrent = fmtKey(viewingMonday) === fmtKey(currentMonday);
-  document.getElementById('weekTag').textContent = isCurrent ? 'This week' : (viewingMonday < currentMonday ? 'Past week' : 'Upcoming');
-  document.getElementById('jumpBtn').style.display = isCurrent ? 'none' : 'inline';
+  const prevBtn = document.getElementById('prevWeekBtn');
+  const nextBtn = document.getElementById('nextWeekBtn');
+  const tagEl = document.getElementById('weekTag');
+  const jumpBtn = document.getElementById('jumpBtn');
+  const dateEl = document.getElementById('weekDateLabel');
+
+  if(currentView === 'history'){
+    dateEl.textContent = 'Collected to date';
+    tagEl.style.display = 'none';
+    jumpBtn.style.display = 'none';
+    prevBtn.style.visibility = 'hidden';
+    nextBtn.style.visibility = 'hidden';
+  } else {
+    dateEl.textContent = fmtLabelFull(viewingMonday);
+    tagEl.style.display = '';
+    prevBtn.style.visibility = 'visible';
+    nextBtn.style.visibility = 'visible';
+    const isCurrent = fmtKey(viewingMonday) === fmtKey(currentMonday);
+    tagEl.textContent = isCurrent ? 'This week' : (viewingMonday < currentMonday ? 'Past week' : 'Upcoming');
+    jumpBtn.style.display = isCurrent ? 'none' : 'inline';
+  }
 }
 
 function shiftWeek(dir){
@@ -838,20 +851,20 @@ function jumpToCurrentWeek(){
 }
 
 function renderScoreboard(){
-  const wk = getWeek(fmtKey(viewingMonday));
-  const fined = wk.fines.reduce((s,f)=>s+f.amount,0);
-  const collected = wk.payments.reduce((s,p)=>s+p.amount,0);
+  let fined = 0, collected = 0;
+  if(currentView === 'history'){
+    Object.values(data.weeks).forEach(wk=>{
+      fined += wk.fines.reduce((s,f)=>s+f.amount,0);
+      collected += wk.payments.reduce((s,p)=>s+p.amount,0);
+    });
+  } else {
+    const wk = getWeek(fmtKey(viewingMonday));
+    fined = wk.fines.reduce((s,f)=>s+f.amount,0);
+    collected = wk.payments.reduce((s,p)=>s+p.amount,0);
+  }
   document.getElementById('scoreFined').textContent = money(fined);
   document.getElementById('scoreCollected').textContent = money(collected);
   document.getElementById('scoreOwing').textContent = money(Math.max(0, fined-collected));
-}
-
-function renderHeroTotal(){
-  let totalCollected = 0;
-  Object.values(data.weeks).forEach(wk=>{
-    totalCollected += wk.payments.reduce((s,p)=>s+p.amount,0);
-  });
-  document.getElementById('heroTotalAmt').textContent = money(totalCollected);
 }
 
 function renderPlayerGrid(){
@@ -1036,12 +1049,15 @@ function escapeHtml(s){
 
 /* ---------------- View switching ---------------- */
 function showView(view){
+  currentView = view;
   document.getElementById('mainView').style.display = view==='main' ? '' : 'none';
   document.getElementById('historyView').style.display = view==='history' ? '' : 'none';
   document.getElementById('settingsView').style.display = view==='settings' ? '' : 'none';
   document.getElementById('tabMain').classList.toggle('active', view==='main');
   document.getElementById('tabHistory').classList.toggle('active', view==='history');
   document.getElementById('tabSettings').classList.toggle('active', view==='settings');
+  renderWeekHeader();
+  renderScoreboard();
   if(view==='history') renderHistory();
 }
 
