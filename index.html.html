@@ -218,9 +218,10 @@
     background:var(--cream);
     width:100%; max-width:520px;
     border-top-left-radius:22px; border-top-right-radius:22px;
-    max-height:92vh; overflow-y:auto;
+    max-height:92vh; max-height:92dvh; overflow-y:auto;
     animation:slideUp .22s ease-out;
     padding-bottom:24px;
+    -webkit-overflow-scrolling:touch;
   }
   @keyframes slideUp{from{transform:translateY(24px); opacity:0.6;} to{transform:translateY(0); opacity:1;}}
   .panel-head{
@@ -955,6 +956,7 @@ function openPlayerPanel(playerId){
 
   renderPanelLists();
   document.getElementById('playerOverlay').classList.add('open');
+  lockBodyScroll();
 }
 
 function closePlayerPanel(){
@@ -964,6 +966,7 @@ function closePlayerPanel(){
   document.getElementById('customFineLabel').value='';
   document.getElementById('customFineAmount').value='';
   document.getElementById('paymentAmount').value='';
+  forceUnlockBodyScroll();
   render();
 }
 
@@ -1145,11 +1148,13 @@ function openDoq(){
   document.getElementById('doqSpinBtn').disabled = false;
   document.getElementById('doqSpinBtn').textContent = 'Spin the wheel';
   document.getElementById('doqOverlay').classList.add('open');
+  lockBodyScroll();
 }
 
 function closeDoq(){
   if(doqSpinning) return;
   document.getElementById('doqOverlay').classList.remove('open');
+  unlockBodyScroll();
 }
 
 function spinDoq(){
@@ -1322,21 +1327,56 @@ function resetAllData(){
   });
 }
 
+/* ---------------- Body scroll lock (keeps background/tab bar still when a panel's keyboard opens) ---------------- */
+let openOverlayCount = 0;
+let lockedScrollY = 0;
+function lockBodyScroll(){
+  if(openOverlayCount === 0){
+    lockedScrollY = window.scrollY;
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${lockedScrollY}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+  }
+  openOverlayCount++;
+}
+function unlockBodyScroll(){
+  openOverlayCount = Math.max(0, openOverlayCount - 1);
+  if(openOverlayCount === 0){
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    window.scrollTo(0, lockedScrollY);
+  }
+}
+function forceUnlockBodyScroll(){
+  openOverlayCount = 0;
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.left = '';
+  document.body.style.right = '';
+  window.scrollTo(0, lockedScrollY);
+}
+
 /* ---------------- Custom confirm modal ---------------- */
 let confirmCallback = null;
 function showConfirm(message, onConfirm){
   confirmCallback = onConfirm;
   document.getElementById('confirmMessage').textContent = message;
   document.getElementById('confirmOverlay').classList.add('open');
+  lockBodyScroll();
 }
 function confirmOk(){
   document.getElementById('confirmOverlay').classList.remove('open');
+  unlockBodyScroll();
   const cb = confirmCallback;
   confirmCallback = null;
   if(cb) cb();
 }
 function confirmCancel(){
   document.getElementById('confirmOverlay').classList.remove('open');
+  unlockBodyScroll();
   confirmCallback = null;
 }
 
