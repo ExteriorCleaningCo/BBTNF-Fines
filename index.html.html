@@ -36,7 +36,7 @@
     --mono: 'SF Mono', 'Menlo', 'Consolas', 'Courier New', monospace;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
-  html,body{margin:0;padding:0;}
+  html,body{margin:0;padding:0; overscroll-behavior-y:contain;}
   body{
     background:var(--cream);
     color:var(--ink);
@@ -211,6 +211,8 @@
     background:#fff; border-top:1px solid var(--line);
     display:flex; padding:6px 8px calc(6px + env(safe-area-inset-bottom));
     z-index:20;
+    transform:translateZ(0);
+    -webkit-transform:translateZ(0);
   }
   .tab{
     flex:1; background:none; border:none; display:flex; flex-direction:column;
@@ -224,6 +226,8 @@
   .overlay{
     position:fixed; inset:0; background:rgba(18,41,33,0.5);
     display:none; align-items:flex-end; justify-content:center; z-index:50;
+    touch-action:none;
+    overscroll-behavior:contain;
   }
   .overlay.open{display:flex;}
   .panel{
@@ -234,6 +238,8 @@
     animation:slideUp .22s ease-out;
     padding-bottom:24px;
     -webkit-overflow-scrolling:touch;
+    touch-action:pan-y;
+    overscroll-behavior:contain;
   }
   @keyframes slideUp{from{transform:translateY(24px); opacity:0.6;} to{transform:translateY(0); opacity:1;}}
   .panel-head{
@@ -1316,8 +1322,10 @@ function openDoq(){
   if(owed <= 0){ showToast('Nothing owed this week to spin for'); return; }
   document.getElementById('doqOwedAmt2').textContent = money(owed);
   document.getElementById('doqResultText').textContent = '';
-  document.getElementById('doqSpinBtn').disabled = false;
-  document.getElementById('doqSpinBtn').textContent = 'Spin the wheel';
+  const spinBtn = document.getElementById('doqSpinBtn');
+  spinBtn.disabled = false;
+  spinBtn.textContent = 'Spin the wheel';
+  spinBtn.onclick = spinDoq;
   document.getElementById('doqOverlay').classList.add('open');
   lockBodyScroll();
 }
