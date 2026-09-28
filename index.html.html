@@ -701,12 +701,12 @@ const STORAGE_KEY = 'finesBookData';
 
 /* ====== FIREBASE SETUP — paste your config from the Firebase console here ====== */
 const firebaseConfig = {
-  apiKey: "PASTE_YOUR_API_KEY_HERE",
-  authDomain: "PASTE_YOUR_AUTH_DOMAIN_HERE",
-  projectId: "PASTE_YOUR_PROJECT_ID_HERE",
-  storageBucket: "PASTE_YOUR_STORAGE_BUCKET_HERE",
-  messagingSenderId: "PASTE_YOUR_SENDER_ID_HERE",
-  appId: "PASTE_YOUR_APP_ID_HERE"
+  apiKey: "AIzaSyAzPgry4phOuZEbw7wg5YlYjpxz7qwA02o",
+  authDomain: "bbtnf-fines-bf27b.firebaseapp.com",
+  projectId: "bbtnf-fines-bf27b",
+  storageBucket: "bbtnf-fines-bf27b.firebasestorage.app",
+  messagingSenderId: "786452065634",
+  appId: "1:786452065634:web:8dbdd99747541c38c1103b"
 };
 /* ====== Shared PIN — change this to whatever you want the squad to use ====== */
 const APP_PIN = '2026';
@@ -714,8 +714,62 @@ const PIN_STORAGE_KEY = 'bbtnfPinOk';
 
 let db = null;
 let firebaseReady = false;
-let applyingRemoteUpdate = false;
 let firestoreUnsub = null;
+const SYNCED_KEY = 'finesBookSynced';
+let lastSynced = null;      // last version of the cloud data this device has seen
+let syncing = false;
+let syncQueued = false;
+let pendingRemote = null;
+let retryTimer = null;
+let restingSaveText = '✓ All changes saved on this device';
+
+const clone = o => JSON.parse(JSON.stringify(o));
+// Empty weeks (created just by looking at a week) don't count as real data
+function norm(d){
+  const o = clone(d); const w = {};
+  Object.keys(o.weeks||{}).forEach(k=>{
+    const wk = o.weeks[k];
+    if((wk.fines||[]).length || (wk.payments||[]).length) w[k] = wk;
+  });
+  o.weeks = w; return o;
+}
+const sameData = (a,b) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+let syncTimes = [];
+
+try{ const s = localStorage.getItem(SYNCED_KEY); if(s) lastSynced = migrateData(JSON.parse(s)); }catch(e){}
+function persistSynced(){ try{ localStorage.setItem(SYNCED_KEY, JSON.stringify(lastSynced)); }catch(e){} }
+
+/* ---- Merge logic: combine my changes with the cloud copy without losing either side ---- */
+function mergeById(base, local, remote){
+  const bIds = new Set(base.map(x=>x.id));
+  const lIds = new Set(local.map(x=>x.id));
+  const rIds = new Set(remote.map(x=>x.id));
+  const out = [];
+  remote.forEach(r=>{ if(bIds.has(r.id) && !lIds.has(r.id)) return; out.push(r); }); // I deleted it
+  local.forEach(l=>{ if(!bIds.has(l.id) && !rIds.has(l.id)) out.push(l); });          // I added it
+  return out;
+}
+function mergeStates(base, local, remote){
+  if(!base) return remote;
+  const out = { groupName: (local.groupName !== base.groupName) ? local.groupName : remote.groupName };
+  ['players','fineTypes','rewardTypes'].forEach(k=>{
+    out[k] = mergeById(base[k]||[], local[k]||[], remote[k]||[]);
+  });
+  out.weeks = {};
+  const keys = new Set([...Object.keys(base.weeks||{}), ...Object.keys(local.weeks||{}), ...Object.keys(remote.weeks||{})]);
+  keys.forEach(k=>{
+    const b = (base.weeks||{})[k] || {fines:[],payments:[]};
+    const l = (local.weeks||{})[k] || {fines:[],payments:[]};
+    const r = (remote.weeks||{})[k] || {fines:[],payments:[]};
+    const fines = mergeById(b.fines||[], l.fines||[], r.fines||[]);
+    const payments = mergeById(b.payments||[], l.payments||[], r.payments||[]);
+    if(fines.length || payments.length) out.weeks[k] = { fines, payments };
+  });
+  return out;
+}
+function hasActivity(d){
+  return Object.values(d.weeks||{}).some(w=>(w.fines||[]).length || (w.payments||[]).length);
+}
 
 function initFirebase(){
   if(firebaseConfig.apiKey.startsWith('PASTE_')){
@@ -725,9 +779,9 @@ function initFirebase(){
   try{
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
-    try{ db.enablePersistence({ synchronizeTabs: true }).catch(()=>{}); }catch(e){}
     firebaseReady = true;
     connectToCloud();
+    window.addEventListener('online', ()=>syncToCloud());
   }catch(e){
     console.error('Firebase init failed', e);
     showSyncBanner('Could not connect — using local data only', true);
@@ -738,32 +792,114 @@ function connectToCloud(){
   const docRef = db.collection('bbtnf').doc('state');
   showSyncBanner('Connecting…', false);
 
-  docRef.get().then(snap=>{
-    if(snap.exists){
-      applyingRemoteUpdate = true;
-      data = migrateData(snap.data());
-      applyingRemoteUpdate = false;
-      render();
+  docRef.get({ source: 'server' }).then(snap=>{
+    if(!snap.exists){
+      syncToCloud(); // first ever use — put this device's data in the cloud
     } else {
-      // First time ever — seed the cloud with whatever's on this device
-      docRef.set(data);
+      processRemote(migrateData(snap.data()), true);
     }
     hideSyncBanner();
 
-    firestoreUnsub = docRef.onSnapshot(snap=>{
-      if(!snap.exists) return;
-      applyingRemoteUpdate = true;
-      data = migrateData(snap.data());
-      applyingRemoteUpdate = false;
-      render();
+    firestoreUnsub = docRef.onSnapshot(s=>{
+      if(!s.exists || s.metadata.fromCache || s.metadata.hasPendingWrites) return;
+      const remote = migrateData(s.data());
+      if(syncing){ pendingRemote = remote; return; }
+      processRemote(remote, false);
     }, err=>{
       console.error('Sync error', err);
       showSyncBanner('Sync lost — changes are saving to this device only', true);
     });
   }).catch(err=>{
     console.error('Could not reach cloud', err);
-    showSyncBanner('Offline — changes will sync once back online', true);
+    showSyncBanner('Offline — changes saved here, will sync when back online', true);
+    setSyncStatus(false);
+    scheduleRetry();
   });
+}
+
+// A new version of the cloud data has arrived — fold it into what's on screen
+function processRemote(remote, isFirstConnect){
+  if(isFirstConnect && !lastSynced){
+    // First time this device talks to the cloud
+    if(hasActivity(data) && !hasActivity(remote)){
+      lastSynced = clone(remote);
+      persistSynced();
+      syncToCloud();           // this device has the real data, cloud is blank: push ours up
+      return;
+    }
+    data = clone(remote);      // otherwise the cloud is the source of truth
+    lastSynced = clone(remote);
+    persistSynced();
+    afterRemoteApplied();
+    return;
+  }
+  if(sameData(remote, lastSynced)) return;
+  data = mergeStates(lastSynced, data, remote);
+  lastSynced = clone(remote);
+  persistSynced();
+  afterRemoteApplied();
+  if(!sameData(data, remote)) syncToCloud(); // I had unsent changes — send them
+}
+
+function afterRemoteApplied(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }catch(e){}
+  render();
+  if(document.getElementById('playerOverlay').classList.contains('open')){
+    if(!data.players.some(p=>p.id===activePlayerId)) closePlayerPanel();
+    else renderPanelLists();
+  }
+}
+
+// Push my changes to the cloud by merging into the latest cloud copy (never a blind overwrite)
+async function syncToCloud(){
+  if(!firebaseReady || !db) return;
+  if(syncing){ syncQueued = true; return; }
+  const now = Date.now();
+  syncTimes = syncTimes.filter(t=>now-t<10000);
+  if(syncTimes.length >= 15){ scheduleRetry(); return; }   // safety brake against runaway syncing
+  syncTimes.push(now);
+  syncing = true;
+  const sent = clone(data);
+  const ref = db.collection('bbtnf').doc('state');
+  try{
+    let merged = null;
+    await db.runTransaction(async t=>{
+      const snap = await t.get(ref);
+      const remote = snap.exists ? migrateData(snap.data()) : null;
+      merged = remote ? mergeStates(lastSynced || remote, sent, remote) : sent;
+      t.set(ref, merged);
+    });
+    lastSynced = clone(merged);
+    persistSynced();
+    data = mergeStates(sent, data, merged);   // keep anything edited while this was sending
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }catch(e){}
+    if(!sameData(sent, merged)) afterRemoteApplied();
+    setSyncStatus(true);
+    hideSyncBanner();
+  }catch(err){
+    console.error('Cloud sync failed', err);
+    showSyncBanner('Offline — changes saved here, will sync when back online', true);
+    setSyncStatus(false);
+    scheduleRetry();
+  }finally{
+    syncing = false;
+    if(pendingRemote){ const r = pendingRemote; pendingRemote = null; processRemote(r, false); }
+    if(syncQueued || (lastSynced && !sameData(data, lastSynced) && !retryTimer)){
+      syncQueued = false;
+      syncToCloud();
+    }
+  }
+}
+
+function scheduleRetry(){
+  if(retryTimer) return;
+  retryTimer = setTimeout(()=>{ retryTimer = null; syncToCloud(); }, 8000);
+}
+
+function setSyncStatus(ok){
+  restingSaveText = ok ? '✓ Synced with everyone' : '⚠ Saved on this device — will sync when online';
+  const el = document.getElementById('saveStatus');
+  if(el && !el.classList.contains('pulsing')) el.textContent = restingSaveText;
 }
 
 function migrateData(parsed){
@@ -873,12 +1009,7 @@ function saveData(){
     if(el){ el.textContent = '⚠ Not saved — check device storage'; el.classList.remove('pulsing'); }
   }
 
-  if(firebaseReady && db && !applyingRemoteUpdate){
-    db.collection('bbtnf').doc('state').set(data).catch(err=>{
-      console.error('Cloud save failed', err);
-      showSyncBanner('Offline — changes will sync once back online', true);
-    });
-  }
+  syncToCloud();
 }
 
 let saveFlashTimer;
@@ -889,7 +1020,7 @@ function flashSaved(){
   el.classList.add('pulsing');
   clearTimeout(saveFlashTimer);
   saveFlashTimer = setTimeout(()=>{
-    el.textContent = '✓ All changes saved on this device';
+    el.textContent = restingSaveText;
     el.classList.remove('pulsing');
   }, 1200);
 }
@@ -933,7 +1064,8 @@ let currentView = 'main';
 /* ---------------- Rendering ---------------- */
 function render(){
   document.getElementById('groupNameDisplay').textContent = data.groupName;
-  document.getElementById('groupNameInput').value = data.groupName;
+  const gni = document.getElementById('groupNameInput');
+  if(document.activeElement !== gni) gni.value = data.groupName;
   renderWeekHeader();
   renderScoreboard();
   renderPlayerGrid();
